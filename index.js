@@ -2,28 +2,18 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const { PrismaClient } = require('@prisma/client');
 
 const app = express();
 const PORT = 3000;
+const prisma = new PrismaClient();
 
 // Секретный ключ для JWT (в продакшене должен быть в .env)
-const JWT_SECRET = 'nova_messenger_secret_key_2024';
+const JWT_SECRET = 'qwikxp_secret_key_2024';
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// Простое хранилище пользователей (в продакшене - база данных)
-const users = [
-  {
-    id: 1,
-    username: 'admin',
-    email: 'admin@nova.com',
-    passwordHash: bcrypt.hashSync('password', 10),
-    displayName: 'Администратор',
-    createdAt: new Date()
-  }
-];
 
 // Middleware для проверки JWT токена
 const authenticateToken = (req, res, next) => {
@@ -46,9 +36,9 @@ const authenticateToken = (req, res, next) => {
 // Routes
 app.get('/', (req, res) => {
   res.json({
-    message: 'Nova Messenger API v2.0',
+    message: 'QwikXP Messenger API v3.0',
     status: 'Running',
-    features: ['Authentication', 'JWT Tokens', 'User Management'],
+    features: ['Database', 'JWT Auth', 'User Management', 'Chats & Messages'],
     timestamp: new Date().toISOString()
   });
 });
@@ -56,9 +46,10 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
-    version: '2.0.0',
+    version: '3.0.0',
+    database: 'SQLite (Prisma)',
     timestamp: new Date().toISOString(),
-    service: 'Nova Messenger Backend'
+    service: 'QwikXP Messenger Backend'
   });
 });
 
@@ -76,7 +67,15 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     // Проверка существования пользователя
-    const existingUser = users.find(u => u.username === username || u.email === email);
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username: username },
+          { email: email }
+        ]
+      }
+    });
+
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -87,17 +86,15 @@ app.post('/api/auth/register', async (req, res) => {
     // Хеширование пароля
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Создание нового пользователя
-    const newUser = {
-      id: users.length + 1,
-      username,
-      email: email || null,
-      passwordHash,
-      displayName: displayName || username,
-      createdAt: new Date()
-    };
-
-    users.push(newUser);
+    // Создание нового пользователя в базе данных
+    const newUser = await prisma.user.create({
+      data: {
+        username,
+        email: email || null,
+        passwordHash,
+        displayName: displayName || username
+      }
+    });
 
     // Генерация JWT токена
     const token = jwt.sign(
@@ -139,8 +136,11 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    // Поиск пользователя
-    const user = users.find(u => u.username === username);
+    // Поиск пользователя в базе данных
+    const user = await prisma.user.findUnique({
+      where: { username: username }
+    });
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -156,6 +156,12 @@ app.post('/api/auth/login', async (req, res) => {
         error: 'Неверные учетные данные'
       });
     }
+
+    // Обновление времени последнего входа
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastSeenAt: new Date() }
+    });
 
     // Генерация JWT токена
     const token = jwt.sign(
@@ -173,7 +179,8 @@ app.post('/api/auth/login', async (req, res) => {
         username: user.username,
         email: user.email,
         displayName: user.displayName,
-        createdAt: user.createdAt
+        createdAt: user.createdAt,
+        lastSeenAt: user.lastSeenAt
       }
     });
 
@@ -187,48 +194,316 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // Защищенные маршруты
-app.get('/api/users', authenticateToken, (req, res) => {
-  const safeUsers = users.map(user => ({
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    displayName: user.displayName,
-    createdAt: user.createdAt
-  }));
+app.get('/api/users', authenticateToken, async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: { isDeleted: false },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        displayName: true,
+        bio: true,
+        avatarUrl: true,
+        createdAt: true,
+        lastSeenAt: true
+      }
+    });
 
-  res.json({
-    success: true,
-    users: safeUsers,
-    total: safeUsers.length
-  });
-});
-
-app.get('/api/users/profile', authenticateToken, (req, res) => {
-  const user = users.find(u => u.id === req.user.userId);
-  if (!user) {
-    return res.status(404).json({
+    res.json({
+      success: true,
+      users,
+      total: users.length
+    });
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({
       success: false,
-      error: 'Пользователь не найден'
+      error: 'Ошибка при получении пользователей'
     });
   }
+});
 
-  res.json({
-    success: true,
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      displayName: user.displayName,
-      createdAt: user.createdAt
+app.get('/api/users/profile', authenticateToken, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        displayName: true,
+        bio: true,
+        avatarUrl: true,
+        createdAt: true,
+        lastSeenAt: true
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'Пользователь не найден'
+      });
     }
-  });
+
+    res.json({
+      success: true,
+      user
+    });
+  } catch (error) {
+    console.error('Get profile error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Ошибка при получении профиля'
+    });
+  }
+});
+
+// Чаты
+app.post('/api/chats', authenticateToken, async (req, res) => {
+  try {
+    const { isGroup, title, memberIds } = req.body;
+
+    if (!memberIds || memberIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Необходимо указать участников чата'
+      });
+    }
+
+    // Создание чата
+    const chat = await prisma.chat.create({
+      data: {
+        isGroup: isGroup || false,
+        title: title || null,
+        ownerId: isGroup ? req.user.userId : null,
+        members: {
+          create: [
+            // Добавляем создателя чата
+            {
+              userId: req.user.userId,
+              role: isGroup ? 'owner' : 'member'
+            },
+            // Добавляем других участников
+            ...memberIds.map(userId => ({
+              userId,
+              role: 'member'
+            }))
+          ]
+        }
+      },
+      include: {
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                avatarUrl: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Чат создан',
+      chat
+    });
+
+  } catch (error) {
+    console.error('Create chat error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Ошибка при создании чата'
+    });
+  }
+});
+
+app.get('/api/chats', authenticateToken, async (req, res) => {
+  try {
+    const chats = await prisma.chat.findMany({
+      where: {
+        members: {
+          some: {
+            userId: req.user.userId
+          }
+        }
+      },
+      include: {
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                avatarUrl: true
+              }
+            }
+          }
+        },
+        messages: {
+          orderBy: { sentAt: 'desc' },
+          take: 1
+        }
+      },
+      orderBy: { updatedAt: 'desc' }
+    });
+
+    res.json({
+      success: true,
+      chats
+    });
+  } catch (error) {
+    console.error('Get chats error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Ошибка при получении чатов'
+    });
+  }
+});
+
+// Сообщения
+app.post('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { content, type = 'TEXT', mediaUrl, mediaMeta } = req.body;
+
+    if (!content) {
+      return res.status(400).json({
+        success: false,
+        error: 'Содержание сообщения обязательно'
+      });
+    }
+
+    // Проверяем, что пользователь является участником чата
+    const chatMember = await prisma.chatMember.findUnique({
+      where: {
+        chatId_userId: {
+          chatId,
+          userId: req.user.userId
+        }
+      }
+    });
+
+    if (!chatMember) {
+      return res.status(403).json({
+        success: false,
+        error: 'Доступ к чату запрещен'
+      });
+    }
+
+    // Создаем сообщение
+    const message = await prisma.message.create({
+      data: {
+        chatId,
+        senderId: req.user.userId,
+        type,
+        content,
+        mediaUrl,
+        mediaMeta
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatarUrl: true
+          }
+        }
+      }
+    });
+
+    // Обновляем время последнего сообщения в чате
+    await prisma.chat.update({
+      where: { id: chatId },
+      data: { updatedAt: new Date() }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Сообщение отправлено',
+      data: message
+    });
+
+  } catch (error) {
+    console.error('Send message error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Ошибка при отправке сообщения'
+    });
+  }
+});
+
+app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { limit = 50, offset = 0 } = req.query;
+
+    // Проверяем, что пользователь является участником чата
+    const chatMember = await prisma.chatMember.findUnique({
+      where: {
+        chatId_userId: {
+          chatId,
+          userId: req.user.userId
+        }
+      }
+    });
+
+    if (!chatMember) {
+      return res.status(403).json({
+        success: false,
+        error: 'Доступ к чату запрещен'
+      });
+    }
+
+    // Получаем сообщения
+    const messages = await prisma.message.findMany({
+      where: {
+        chatId,
+        deletedAt: null
+      },
+      include: {
+        sender: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatarUrl: true
+          }
+        }
+      },
+      orderBy: { sentAt: 'desc' },
+      take: parseInt(limit),
+      skip: parseInt(offset)
+    });
+
+    res.json({
+      success: true,
+      messages: messages.reverse(),
+      total: messages.length
+    });
+
+  } catch (error) {
+    console.error('Get messages error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Ошибка при получении сообщений'
+    });
+  }
 });
 
 // Тестовый маршрут
 app.get('/api/test', (req, res) => {
   res.json({
-    message: 'Nova Messenger API v2.0 работает!',
-    features: ['JWT Auth', 'User Management', 'Protected Routes'],
+    message: 'QwikXP Messenger API v3.0 работает!',
+    features: ['Database', 'JWT Auth', 'User Management', 'Chats & Messages'],
     endpoint: '/api/test',
     timestamp: new Date().toISOString()
   });
@@ -245,19 +520,34 @@ app.use('*', (req, res) => {
       'POST /api/auth/register',
       'POST /api/auth/login',
       'GET /api/users (protected)',
-      'GET /api/users/profile (protected)'
+      'GET /api/users/profile (protected)',
+      'POST /api/chats (protected)',
+      'GET /api/chats (protected)',
+      'POST /api/chats/:chatId/messages (protected)',
+      'GET /api/chats/:chatId/messages (protected)'
     ]
   });
 });
 
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\n🔄 Закрытие соединения с базой данных...');
+  await prisma.$disconnect();
+  console.log('✅ Соединение с базой данных закрыто');
+  process.exit(0);
+});
+
 // Start server
 app.listen(PORT, () => {
-  console.log('🚀 Nova Messenger API v2.0');
+  console.log('🚀 QwikXP Messenger API v3.0');
   console.log(`📍 Running on port ${PORT}`);
+  console.log(`🗄️ Database: SQLite (Prisma)`);
   console.log(`🔗 Health: http://localhost:${PORT}/health`);
   console.log(`🧪 Test: http://localhost:${PORT}/api/test`);
   console.log(`🔐 Register: POST http://localhost:${PORT}/api/auth/register`);
   console.log(`🔑 Login: POST http://localhost:${PORT}/api/auth/login`);
   console.log(`👥 Users: GET http://localhost:${PORT}/api/users (protected)`);
-  console.log('✅ Server is ready with JWT Authentication!');
+  console.log(`💬 Chats: POST/GET http://localhost:${PORT}/api/chats (protected)`);
+  console.log(`📝 Messages: POST/GET http://localhost:${PORT}/api/chats/:chatId/messages (protected)`);
+  console.log('✅ Server is ready with Database & JWT Authentication!');
 });
