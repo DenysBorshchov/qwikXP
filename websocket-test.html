@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QwikXP WebSocket Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 30px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #fff;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input, button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        
+        input {
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            cursor: pointer;
+            transition: transform 0.2s;
+            margin-bottom: 10px;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        
+        .status.connected {
+            background: rgba(46, 204, 113, 0.3);
+            border: 1px solid #2ecc71;
+            color: #2ecc71;
+        }
+        
+        .status.disconnected {
+            background: rgba(231, 76, 60, 0.3);
+            border: 1px solid #e74c3c;
+            color: #e74c3c;
+        }
+        
+        .status.connecting {
+            background: rgba(241, 196, 15, 0.3);
+            border: 1px solid #f1c40f;
+            color: #f1c40f;
+        }
+        
+        .logs {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+        
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-radius: 4px;
+        }
+        
+        .log-info { background: rgba(52, 152, 219, 0.3); }
+        .log-success { background: rgba(46, 204, 113, 0.3); }
+        .log-error { background: rgba(231, 76, 60, 0.3); }
+        .log-warning { background: rgba(241, 196, 15, 0.3); }
+        
+        .message-form {
+            display: none;
+            margin-top: 20px;
+        }
+        
+        .message-form.show {
+            display: block;
+        }
+        
+        .typing-indicator {
+            font-style: italic;
+            color: #f1c40f;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 QwikXP WebSocket Test</h1>
+        
+        <div class="form-group">
+            <label for="token">JWT Token:</label>
+            <input type="text" id="token" placeholder="Введите ваш JWT токен">
+        </div>
+        
+        <button id="connectBtn" onclick="connectWebSocket()">🔌 Подключиться к WebSocket</button>
+        <button id="disconnectBtn" onclick="disconnectWebSocket()" disabled>❌ Отключиться</button>
+        
+        <div id="status" class="status disconnected">
+            ❌ Отключено
+        </div>
+        
+        <div id="messageForm" class="message-form">
+            <h3>💬 Тестирование чата</h3>
+            
+            <div class="form-group">
+                <label for="chatId">Chat ID:</label>
+                <input type="text" id="chatId" placeholder="Введите ID чата">
+            </div>
+            
+            <div class="form-group">
+                <label for="messageContent">Сообщение:</label>
+                <input type="text" id="messageContent" placeholder="Введите сообщение">
+            </div>
+            
+            <button onclick="sendTypingStart()">⌨️ Начать печатать</button>
+            <button onclick="sendTypingStop()">⏹️ Остановить печатать</button>
+            <button onclick="sendUserStatus()">👤 Обновить статус</button>
+            
+            <div id="typingIndicator" class="typing-indicator"></div>
+        </div>
+        
+        <h3>📋 Логи WebSocket:</h3>
+        <div id="logs" class="logs"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isConnected = false;
+        
+        function log(message, type = 'info') {
+            const logs = document.getElementById('logs');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logs.appendChild(logEntry);
+            logs.scrollTop = logs.scrollHeight;
+        }
+        
+        function updateStatus(status, message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${status}`;
+            statusDiv.textContent = message;
+        }
+        
+        function connectWebSocket() {
+            const token = document.getElementById('token').value.trim();
+            
+            if (!token) {
+                alert('Введите JWT токен!');
+                return;
+            }
+            
+            updateStatus('connecting', '🔄 Подключение...');
+            log('Попытка подключения к WebSocket...', 'info');
+            
+            try {
+                ws = new WebSocket(`ws://localhost:3000?token=${token}`);
+                
+                ws.onopen = function() {
+                    isConnected = true;
+                    updateStatus('connected', '✅ Подключено к WebSocket');
+                    log('WebSocket соединение установлено!', 'success');
+                    
+                    document.getElementById('connectBtn').disabled = true;
+                    document.getElementById('disconnectBtn').disabled = false;
+                    document.getElementById('messageForm').classList.add('show');
+                };
+                
+                ws.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        log(`📨 Получено: ${JSON.stringify(data, null, 2)}`, 'success');
+                        
+                        // Обработка различных типов сообщений
+                        switch(data.type) {
+                            case 'connection_established':
+                                log(`✅ Подключение подтверждено для пользователя ${data.userId}`, 'success');
+                                break;
+                            case 'typing_start':
+                                showTypingIndicator(data.userId, data.chatId);
+                                break;
+                            case 'typing_stop':
+                                hideTypingIndicator(data.userId, data.chatId);
+                                break;
+                            case 'new_message':
+                                log(`💬 Новое сообщение в чате ${data.data.chatId}`, 'info');
+                                break;
+                            case 'user_status':
+                                log(`👤 Статус пользователя ${data.userId}: ${data.status}`, 'info');
+                                break;
+                        }
+                    } catch (error) {
+                        log(`❌ Ошибка парсинга сообщения: ${error.message}`, 'error');
+                    }
+                };
+                
+                ws.onclose = function(event) {
+                    isConnected = false;
+                    updateStatus('disconnected', '❌ Отключено');
+                    log(`WebSocket соединение закрыто. Код: ${event.code}, Причина: ${event.reason}`, 'warning');
+                    
+                    document.getElementById('connectBtn').disabled = false;
+                    document.getElementById('disconnectBtn').disabled = true;
+                    document.getElementById('messageForm').classList.remove('show');
+                };
+                
+                ws.onerror = function(error) {
+                    log(`❌ WebSocket ошибка: ${error.message}`, 'error');
+                };
+                
+            } catch (error) {
+                log(`❌ Ошибка создания WebSocket: ${error.message}`, 'error');
+                updateStatus('disconnected', '❌ Ошибка подключения');
+            }
+        }
+        
+        function disconnectWebSocket() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function sendMessage(type, data) {
+            if (!isConnected || !ws) {
+                alert('WebSocket не подключен!');
+                return;
+            }
+            
+            const message = {
+                type: type,
+                data: data
+            };
+            
+            ws.send(JSON.stringify(message));
+            log(`📤 Отправлено: ${JSON.stringify(message, null, 2)}`, 'info');
+        }
+        
+        function sendTypingStart() {
+            const chatId = document.getElementById('chatId').value.trim();
+            if (!chatId) {
+                alert('Введите Chat ID!');
+                return;
+            }
+            
+            sendMessage('typing_start', { chatId: chatId });
+        }
+        
+        function sendTypingStop() {
+            const chatId = document.getElementById('chatId').value.trim();
+            if (!chatId) {
+                alert('Введите Chat ID!');
+                return;
+            }
+            
+            sendMessage('typing_stop', { chatId: chatId });
+        }
+        
+        function sendUserStatus() {
+            sendMessage('user_status', { status: 'online' });
+        }
+        
+        function showTypingIndicator(userId, chatId) {
+            const indicator = document.getElementById('typingIndicator');
+            indicator.textContent = `👤 Пользователь ${userId} печатает в чате ${chatId}...`;
+        }
+        
+        function hideTypingIndicator(userId, chatId) {
+            const indicator = document.getElementById('typingIndicator');
+            indicator.textContent = '';
+        }
+        
+        // Автоматическое отключение при закрытии страницы
+        window.addEventListener('beforeunload', function() {
+            if (ws) {
+                ws.close();
+            }
+        });
+        
+        log('🚀 QwikXP WebSocket Test готов к использованию!', 'info');
+        log('1. Получите JWT токен через /api/auth/login', 'info');
+        log('2. Введите токен и нажмите "Подключиться"', 'info');
+        log('3. Тестируйте различные WebSocket события', 'info');
+    </script>
+</body>
+</html>

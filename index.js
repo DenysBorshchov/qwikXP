@@ -3,10 +3,16 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { PrismaClient } = require('@prisma/client');
+const http = require('http');
+const WebSocketService = require('./websocket-service');
 
 const app = express();
+const server = http.createServer(app);
 const PORT = 3000;
 const prisma = new PrismaClient();
+
+// Инициализация WebSocket сервиса
+const wsService = new WebSocketService(server);
 
 // Секретный ключ для JWT (в продакшене должен быть в .env)
 const JWT_SECRET = 'qwikxp_secret_key_2024';
@@ -36,9 +42,10 @@ const authenticateToken = (req, res, next) => {
 // Routes
 app.get('/', (req, res) => {
   res.json({
-    message: 'QwikXP Messenger API v3.0',
+    message: 'QwikXP Messenger API v4.0',
     status: 'Running',
-    features: ['Database', 'JWT Auth', 'User Management', 'Chats & Messages'],
+    features: ['Database', 'JWT Auth', 'User Management', 'Chats & Messages', 'Real-time WebSocket'],
+    websocket: 'ws://localhost:3000?token=YOUR_JWT_TOKEN',
     timestamp: new Date().toISOString()
   });
 });
@@ -46,10 +53,20 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
-    version: '3.0.0',
+    version: '4.0.0',
     database: 'SQLite (Prisma)',
+    websocket: 'Active',
+    connections: wsService.getStats(),
     timestamp: new Date().toISOString(),
     service: 'QwikXP Messenger Backend'
+  });
+});
+
+// WebSocket статистика
+app.get('/api/websocket/stats', authenticateToken, (req, res) => {
+  res.json({
+    success: true,
+    stats: wsService.getStats()
   });
 });
 
@@ -309,6 +326,9 @@ app.post('/api/chats', authenticateToken, async (req, res) => {
       }
     });
 
+    // Отправляем WebSocket уведомление о новом чате
+    await wsService.broadcastNewChat(chat.id, chat);
+
     res.status(201).json({
       success: true,
       message: 'Чат создан',
@@ -426,6 +446,9 @@ app.post('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
       data: { updatedAt: new Date() }
     });
 
+    // Отправляем WebSocket уведомление о новом сообщении
+    await wsService.broadcastNewMessage(chatId, message);
+
     res.status(201).json({
       success: true,
       message: 'Сообщение отправлено',
@@ -499,11 +522,21 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
   }
 });
 
+// WebSocket эндпоинт для получения токена подключения
+app.get('/api/websocket/token', authenticateToken, (req, res) => {
+  res.json({
+    success: true,
+    websocketUrl: `ws://localhost:${PORT}?token=${req.headers.authorization.split(' ')[1]}`,
+    message: 'Используйте этот URL для WebSocket подключения'
+  });
+});
+
 // Тестовый маршрут
 app.get('/api/test', (req, res) => {
   res.json({
-    message: 'QwikXP Messenger API v3.0 работает!',
-    features: ['Database', 'JWT Auth', 'User Management', 'Chats & Messages'],
+    message: 'QwikXP Messenger API v4.0 работает!',
+    features: ['Database', 'JWT Auth', 'User Management', 'Chats & Messages', 'Real-time WebSocket'],
+    websocket: 'ws://localhost:3000?token=YOUR_JWT_TOKEN',
     endpoint: '/api/test',
     timestamp: new Date().toISOString()
   });
@@ -524,7 +557,10 @@ app.use('*', (req, res) => {
       'POST /api/chats (protected)',
       'GET /api/chats (protected)',
       'POST /api/chats/:chatId/messages (protected)',
-      'GET /api/chats/:chatId/messages (protected)'
+      'GET /api/chats/:chatId/messages (protected)',
+      'GET /api/websocket/token (protected)',
+      'GET /api/websocket/stats (protected)',
+      'WebSocket: ws://localhost:3000?token=YOUR_JWT_TOKEN'
     ]
   });
 });
@@ -538,10 +574,11 @@ process.on('SIGINT', async () => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log('🚀 QwikXP Messenger API v3.0');
+server.listen(PORT, () => {
+  console.log('🚀 QwikXP Messenger API v4.0');
   console.log(`📍 Running on port ${PORT}`);
   console.log(`🗄️ Database: SQLite (Prisma)`);
+  console.log(`🔌 WebSocket: Active`);
   console.log(`🔗 Health: http://localhost:${PORT}/health`);
   console.log(`🧪 Test: http://localhost:${PORT}/api/test`);
   console.log(`🔐 Register: POST http://localhost:${PORT}/api/auth/register`);
@@ -549,5 +586,6 @@ app.listen(PORT, () => {
   console.log(`👥 Users: GET http://localhost:${PORT}/api/users (protected)`);
   console.log(`💬 Chats: POST/GET http://localhost:${PORT}/api/chats (protected)`);
   console.log(`📝 Messages: POST/GET http://localhost:${PORT}/api/chats/:chatId/messages (protected)`);
-  console.log('✅ Server is ready with Database & JWT Authentication!');
+  console.log(`🔌 WebSocket: ws://localhost:${PORT}?token=YOUR_JWT_TOKEN`);
+  console.log('✅ Server is ready with Database, JWT Auth & Real-time WebSocket!');
 });
