@@ -8,7 +8,8 @@ const WebSocketService = require('./websocket-service');
 
 const app = express();
 const server = http.createServer(app);
-const PORT = 3000;
+const PORT = 3000; // Порт для локальной разработки
+const BASE_URL = 'http://qwicxp.com'; // Основной URL для продакшена
 const prisma = new PrismaClient();
 
 // Инициализация WebSocket сервиса
@@ -45,7 +46,7 @@ app.get('/', (req, res) => {
     message: 'QwikXP Messenger API v4.0',
     status: 'Running',
     features: ['Database', 'JWT Auth', 'User Management', 'Chats & Messages', 'Real-time WebSocket'],
-    websocket: 'ws://localhost:3000?token=YOUR_JWT_TOKEN',
+    websocket: 'ws://qwicxp.com?token=YOUR_JWT_TOKEN',
     timestamp: new Date().toISOString()
   });
 });
@@ -526,7 +527,7 @@ app.get('/api/chats/:chatId/messages', authenticateToken, async (req, res) => {
 app.get('/api/websocket/token', authenticateToken, (req, res) => {
   res.json({
     success: true,
-    websocketUrl: `ws://localhost:${PORT}?token=${req.headers.authorization.split(' ')[1]}`,
+    websocketUrl: `ws://qwicxp.com?token=${req.headers.authorization.split(' ')[1]}`,
     message: 'Используйте этот URL для WebSocket подключения'
   });
 });
@@ -536,7 +537,7 @@ app.get('/api/test', (req, res) => {
   res.json({
     message: 'QwikXP Messenger API v4.0 работает!',
     features: ['Database', 'JWT Auth', 'User Management', 'Chats & Messages', 'Real-time WebSocket'],
-    websocket: 'ws://localhost:3000?token=YOUR_JWT_TOKEN',
+    websocket: 'ws://qwicxp.com?token=YOUR_JWT_TOKEN',
     endpoint: '/api/test',
     timestamp: new Date().toISOString()
   });
@@ -560,7 +561,7 @@ app.use('*', (req, res) => {
       'GET /api/chats/:chatId/messages (protected)',
       'GET /api/websocket/token (protected)',
       'GET /api/websocket/stats (protected)',
-      'WebSocket: ws://localhost:3000?token=YOUR_JWT_TOKEN'
+      'WebSocket: ws://qwicxp.com?token=YOUR_JWT_TOKEN'
     ]
   });
 });
@@ -571,6 +572,24 @@ process.on('SIGINT', async () => {
   await prisma.$disconnect();
   console.log('✅ Соединение с базой данных закрыто');
   process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\n🔄 Получен сигнал SIGTERM, закрытие соединения с базой данных...');
+  await prisma.$disconnect();
+  console.log('✅ Соединение с базой данных закрыто');
+  process.exit(0);
+});
+
+// Предотвращаем неожиданное завершение
+process.on('uncaughtException', (error) => {
+  console.error('❌ Неожиданная ошибка:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Необработанное отклонение промиса:', reason);
+  process.exit(1);
 });
 
 // Start server
@@ -588,4 +607,6 @@ server.listen(PORT, () => {
   console.log(`📝 Messages: POST/GET http://localhost:${PORT}/api/chats/:chatId/messages (protected)`);
   console.log(`🔌 WebSocket: ws://localhost:${PORT}?token=YOUR_JWT_TOKEN`);
   console.log('✅ Server is ready with Database, JWT Auth & Real-time WebSocket!');
+  console.log(`🌐 Production URL: ${BASE_URL}`);
+  console.log(`🔌 Production WebSocket: ws://qwicxp.com?token=YOUR_JWT_TOKEN`);
 });

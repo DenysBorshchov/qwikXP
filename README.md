@@ -15,7 +15,7 @@ npx prisma migrate dev
 npm start
 ```
 
-Сервер запустится на `http://localhost:3000`
+       Сервер запустится на `http://localhost:3000` (локально) или `http://qwicxp.com` (продакшен)
 
 ## ✨ Функции v4.0
 
@@ -51,10 +51,10 @@ npx prisma studio
 
 ## 🔌 WebSocket в реальном времени
 
-### Подключение:
-```
-ws://localhost:3000?token=YOUR_JWT_TOKEN
-```
+       ### Подключение:
+       ```
+       ws://qwicxp.com?token=YOUR_JWT_TOKEN
+       ```
 
 ### Типы сообщений:
 
@@ -172,31 +172,31 @@ Authorization: Bearer YOUR_JWT_TOKEN
 
 ### 1. Проверка здоровья сервера
 ```bash
-curl http://localhost:3000/health
+       curl http://qwicxp.com/health
 ```
 
 ### 2. Тест API
 ```bash
-curl http://localhost:3000/api/test
+       curl http://qwicxp.com/api/test
 ```
 
 ### 3. Регистрация пользователя
 ```bash
-curl -X POST http://localhost:3000/api/auth/register \
+       curl -X POST http://qwicxp.com/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"username":"testuser","password":"testpass","displayName":"Тест"}'
 ```
 
 ### 4. Вход в систему
 ```bash
-curl -X POST http://localhost:3000/api/auth/login \
+       curl -X POST http://qwicxp.com/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"testuser","password":"testpass"}'
 ```
 
 ### 5. Создание чата
 ```bash
-curl -X POST http://localhost:3000/api/chats \
+       curl -X POST http://qwicxp.com/api/chats \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"isGroup":false,"memberIds":["other_user_id"]}'

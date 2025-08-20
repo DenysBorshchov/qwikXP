@@ -204,7 +204,7 @@
             log('Попытка подключения к WebSocket...', 'info');
             
             try {
-                ws = new WebSocket(`ws://localhost:3000?token=${token}`);
+                                       ws = new WebSocket(`ws://localhost:3000?token=${token}`);
                 
                 ws.onopen = function() {
                     isConnected = true;
